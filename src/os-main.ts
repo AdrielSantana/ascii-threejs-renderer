@@ -15,7 +15,7 @@ import { aboutApp } from './os/apps/about';
 
 // --- Config ---
 const config = parseAsciiConfig(new URLSearchParams());
-config.cellScale = 160; // smaller ASCII cells / higher resolution
+config.cellScale = 70; // larger ASCII characters / lower resolution
 
 // --- Renderer ---
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
