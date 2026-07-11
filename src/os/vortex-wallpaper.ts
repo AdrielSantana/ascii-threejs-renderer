@@ -15,7 +15,7 @@ const PARTICLE_COUNT = reducedMotion ? 22000 : isMobile ? 38000 : 76000;
 const TRAIL_COUNT = 6;
 
 const IDLE_DELAY_S = 8;        // idle segundos antes de morfar p/ próxima forma
-const SHAPE_DWELL_S = 12;      // segundos na forma antes de voltar ao vortex
+const SHAPE_DWELL_S = 30;      // segundos na forma antes de voltar ao vortex
 const MORPH_DURATION_S = 2.5;  // duração da transição vortex↔forma
 const TOUCH_FADE_S = 0.8;      // retorno acelerado ao vortex quando tocado
 
