@@ -298,6 +298,11 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
   let dragRotY = 0;
   let lastPointerX = 0;
   let lastPointerY = 0;
+  // Angular velocity for flick momentum (rad/s, continues after release)
+  let angularVelX = 0;
+  let angularVelY = 0;
+  let prevDragRotX = 0;
+  let prevDragRotY = 0;
   const _dragRy = new THREE.Matrix3();
   const _dragRx = new THREE.Matrix3();
 
@@ -573,12 +578,23 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       advanceMorphState(t, dt);
     }
 
-    // Decay drag rotation when not dragging (eases back to base spin)
-    if (!pointerActive) {
-      const decay = Math.exp(-2.2 * dt);
-      dragRotX *= decay;
-      dragRotY *= decay;
+    // Track angular velocity during drag (delta of dragRot per frame)
+    if (pointerActive) {
+      const dx = dragRotX - prevDragRotX;
+      const dy = dragRotY - prevDragRotY;
+      // Smooth toward new velocity (avoid single-frame spikes)
+      angularVelX = angularVelX * 0.6 + (dx / Math.max(dt, 1e-4)) * 0.4;
+      angularVelY = angularVelY * 0.6 + (dy / Math.max(dt, 1e-4)) * 0.4;
+    } else {
+      // Flick momentum: continue spinning in drag direction, light friction
+      dragRotX += angularVelX * dt;
+      dragRotY += angularVelY * dt;
+      const friction = Math.exp(-0.4 * dt);
+      angularVelX *= friction;
+      angularVelY *= friction;
     }
+    prevDragRotX = dragRotX;
+    prevDragRotY = dragRotY;
     // Build uDragRotation = Ry(dragRotY) * Rx(dragRotX)
     const cx = Math.cos(dragRotX), sx = Math.sin(dragRotX);
     const cy = Math.cos(dragRotY), sy = Math.sin(dragRotY);
@@ -610,6 +626,8 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       forcedShape: forcedShape ?? null,
       dragRotX,
       dragRotY,
+      angularVelX,
+      angularVelY,
       pointerActive,
     }),
   };
