@@ -1,10 +1,12 @@
 import * as THREE from 'three';
+import { generateShape, SHAPE_NAMES, ShapeName } from './shape-library';
 
 /**
  * Fluid Particle Vortex wallpaper.
  *
  * 76k particles (38k mobile) driven entirely by GPU shaders.
  * Pointer interaction creates a fluid trail with spring physics.
+ * Morphs into procedural shapes (cube/torus/torusKnot/galaxy) when idle.
  */
 
 const isMobile = matchMedia('(pointer: coarse)').matches || innerWidth < 760;
@@ -12,7 +14,12 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const PARTICLE_COUNT = reducedMotion ? 22000 : isMobile ? 38000 : 76000;
 const TRAIL_COUNT = 6;
 
-export function createVortexWallpaper(_w: number, _h: number) {
+const IDLE_DELAY_S = 8;        // idle segundos antes de morfar p/ próxima forma
+const SHAPE_DWELL_S = 12;      // segundos na forma antes de voltar ao vortex
+const MORPH_DURATION_S = 2.5;  // duração da transição vortex↔forma
+const TOUCH_FADE_S = 0.8;      // retorno acelerado ao vortex quando tocado
+
+export function createVortexWallpaper(_w: number, _h: number, forcedShape?: ShapeName) {
   const scene = new THREE.Scene();
 
   const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 50);
@@ -48,6 +55,11 @@ export function createVortexWallpaper(_w: number, _h: number) {
   geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
   geometry.setAttribute('aFollow', new THREE.BufferAttribute(follows, 1));
 
+  // Morph target positions (zeroed = vortex only; filled by state machine)
+  const targetArray = new Float32Array(PARTICLE_COUNT * 3);
+  if (forcedShape) generateShape(forcedShape, PARTICLE_COUNT, targetArray);
+  geometry.setAttribute('aTarget', new THREE.BufferAttribute(targetArray, 3));
+
   // ── Trail uniform (array of vec3) ──
   const trailArray = Array.from({ length: TRAIL_COUNT }, () => new THREE.Vector3());
 
@@ -57,6 +69,8 @@ export function createVortexWallpaper(_w: number, _h: number) {
     uInteraction: { value: 0 },
     uVelocity: { value: new THREE.Vector3() },
     uTrail: { value: trailArray },
+    uMorph: { value: forcedShape ? 1 : 0 },
+    uShapeSpin: { value: new THREE.Matrix3() },
   };
 
   // ── Particle shader material ──
@@ -72,10 +86,13 @@ export function createVortexWallpaper(_w: number, _h: number) {
       uniform float uInteraction;
       uniform vec3 uVelocity;
       uniform vec3 uTrail[${TRAIL_COUNT}];
+      uniform float uMorph;
+      uniform mat3 uShapeSpin;
 
       attribute float aSeed;
       attribute float aSize;
       attribute float aFollow;
+      attribute vec3 aTarget;
 
       varying float vAlpha;
       varying float vHue;
@@ -131,7 +148,18 @@ export function createVortexWallpaper(_w: number, _h: number) {
         float dragTwist = uInteraction * speed * 0.035 * (1.0 - normalizedRadius);
         p.xy = rotate2D(dragTwist * (aFollow - 0.5)) * p.xy;
 
-        vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+        // ── Morph toward target shape (uMorph=0 → pure vortex, 1 → target) ──
+        vec3 spunTarget = uShapeSpin * aTarget;
+        // breathing so shapes don't feel frozen
+        vec3 breath = vec3(
+          sin(uTime * 0.9 + aSeed * 8.0),
+          sin(uTime * 0.7 + aSeed * 6.0),
+          sin(uTime * 1.1 + aSeed * 9.0)
+        ) * 0.025;
+        vec3 morphTarget = spunTarget + breath * uMorph;
+        vec3 finalPos = mix(p, morphTarget, uMorph);
+
+        vec4 mvPosition = modelViewMatrix * vec4(finalPos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
 
         float perspective = 7.4 / max(1.0, -mvPosition.z);
@@ -225,6 +253,19 @@ export function createVortexWallpaper(_w: number, _h: number) {
   let pointerId: number | null = null;
   let interaction = 0;
 
+  // ── Morph state ──
+  type MorphPhase = 'vortex_idle' | 'morphing' | 'shape_idle';
+  const SHAPES_ORDER: ShapeName[] = [...SHAPE_NAMES];
+  let phase: MorphPhase = forcedShape ? 'shape_idle' : 'vortex_idle';
+  let morphDir: 1 | -1 = forcedShape ? 1 : -1;
+  let morphProgress = forcedShape ? 1 : 0;
+  let shapeIdx = 0;
+  let shapeStartS = 0;
+  let isTouchFading = false;
+  let currentShapeName: ShapeName | undefined = forcedShape;
+  let currentTimeS = 0;
+  let lastInteractionS = 0;
+
   const trail: { position: THREE.Vector3; velocity: THREE.Vector3 }[] = Array.from(
     { length: TRAIL_COUNT },
     () => ({ position: new THREE.Vector3(), velocity: new THREE.Vector3() }),
@@ -275,6 +316,8 @@ export function createVortexWallpaper(_w: number, _h: number) {
 
   function onPointerDown(e: PointerEvent) {
     if (!shouldHandleVortex(e.target)) return;
+    lastInteractionS = currentTimeS;
+    triggerReturnToVortex();
     pointerActive = true;
     pointerId = e.pointerId;
     interactionLayer.setPointerCapture(e.pointerId);
@@ -284,6 +327,8 @@ export function createVortexWallpaper(_w: number, _h: number) {
   }
 
   function onPointerMove(e: PointerEvent) {
+    // Hover (sem botão) também conta como interação p/ resetar o idle
+    lastInteractionS = currentTimeS;
     if (!pointerActive || e.pointerId !== pointerId) return;
     pointerToWorld(e.clientX, e.clientY);
     e.preventDefault();
@@ -321,8 +366,87 @@ export function createVortexWallpaper(_w: number, _h: number) {
     node.position.addScaledVector(node.velocity, dt);
   }
 
+  // ── Morph helpers ──
+  function smoothEase(x: number): number {
+    return x * x * (3 - 2 * x);
+  }
+
+  function applyShapeSpin(name: ShapeName | undefined, t: number) {
+    const m = uniforms.uShapeSpin.value as THREE.Matrix3;
+    if (!name || name !== 'galaxy') {
+      m.identity();
+      return;
+    }
+    // Y-axis rotation by t * 0.15 (only galaxy has inherent spin)
+    const angle = t * 0.15;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    m.set(c, 0, s, 0, 1, 0, -s, 0, c);
+  }
+
+  function loadShape(name: ShapeName) {
+    generateShape(name, PARTICLE_COUNT, targetArray);
+    geometry.attributes.aTarget.needsUpdate = true;
+    currentShapeName = name;
+  }
+
+  function triggerReturnToVortex() {
+    if (phase === 'vortex_idle') return;
+    if (phase === 'morphing' && morphDir === -1) return;
+    phase = 'morphing';
+    morphDir = -1;
+    isTouchFading = true;
+  }
+
+  function advanceMorphState(t: number, dt: number) {
+    switch (phase) {
+      case 'vortex_idle': {
+        applyShapeSpin(undefined, t);
+        if (t - lastInteractionS >= IDLE_DELAY_S) {
+          const next = SHAPES_ORDER[shapeIdx % SHAPES_ORDER.length];
+          loadShape(next);
+          phase = 'morphing';
+          morphDir = 1;
+          isTouchFading = false;
+        }
+        break;
+      }
+      case 'morphing': {
+        const duration = isTouchFading ? TOUCH_FADE_S : MORPH_DURATION_S;
+        morphProgress += (morphDir * dt) / duration;
+        if (morphProgress >= 1) {
+          morphProgress = 1;
+          uniforms.uMorph.value = 1;
+          phase = 'shape_idle';
+          shapeStartS = t;
+        } else if (morphProgress <= 0) {
+          morphProgress = 0;
+          uniforms.uMorph.value = 0;
+          shapeIdx = (shapeIdx + 1) % SHAPES_ORDER.length;
+          phase = 'vortex_idle';
+          isTouchFading = false;
+          currentShapeName = undefined;
+        } else {
+          uniforms.uMorph.value = smoothEase(morphProgress);
+        }
+        applyShapeSpin(currentShapeName, t);
+        break;
+      }
+      case 'shape_idle': {
+        applyShapeSpin(currentShapeName, t);
+        if (t - shapeStartS >= SHAPE_DWELL_S) {
+          phase = 'morphing';
+          morphDir = -1;
+          isTouchFading = false;
+        }
+        break;
+      }
+    }
+  }
+
   // ── Public API ──
   function update(t: number, dt: number) {
+    currentTimeS = t;
     // Insert interaction overlay if not yet
     if (!inserted) {
       const canvas = document.getElementById('os-canvas');
@@ -366,6 +490,14 @@ export function createVortexWallpaper(_w: number, _h: number) {
       trailArray[i].copy(trail[i].position);
     }
 
+    // Morph state machine (forcedShape bypasses scheduler)
+    if (forcedShape) {
+      uniforms.uMorph.value = 1;
+      applyShapeSpin(forcedShape, t);
+    } else {
+      advanceMorphState(t, dt);
+    }
+
     uniforms.uTime.value = t;
     uniforms.uInteraction.value = interaction;
     uniforms.uVelocity.value.copy(trail[0].velocity);
@@ -376,5 +508,18 @@ export function createVortexWallpaper(_w: number, _h: number) {
     camera.updateProjectionMatrix();
   }
 
-  return { scene, camera, update, resize };
+  return {
+    scene,
+    camera,
+    update,
+    resize,
+    getMorphState: () => ({
+      uMorph: uniforms.uMorph.value as number,
+      phase,
+      morphProgress,
+      shapeIdx,
+      currentShapeName: currentShapeName ?? null,
+      forcedShape: forcedShape ?? null,
+    }),
+  };
 }

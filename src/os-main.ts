@@ -18,8 +18,8 @@ import { snakeApp } from './os/apps/snake';
 import { initSettings } from './os/settings-store';
 
 // --- Config ---
-const config = parseAsciiConfig(new URLSearchParams());
-config.cellScale = 120; // extra large ASCII characters / very low resolution
+const config = parseAsciiConfig(new URLSearchParams(window.location.search));
+config.cellScale = 30; // high resolution ASCII
 
 // --- Renderer ---
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -30,7 +30,14 @@ renderer.domElement.id = 'os-canvas';
 document.body.appendChild(renderer.domElement);
 
 // --- Wallpaper ---
-const wallpaper = createVortexWallpaper(window.innerWidth, window.innerHeight);
+const VALID_SHAPES = ['cube', 'torus', 'torusKnot', 'galaxy'] as const;
+type ForcedShape = (typeof VALID_SHAPES)[number];
+const forcedShape = config.shape && VALID_SHAPES.includes(config.shape as ForcedShape)
+  ? (config.shape as ForcedShape)
+  : undefined;
+const wallpaper = createVortexWallpaper(window.innerWidth, window.innerHeight, forcedShape);
+// Debug surface (dev only)
+(window as any).__wallpaper = wallpaper;
 
 // --- Post-processing ---
 const composer = new EffectComposer(renderer);
@@ -141,35 +148,50 @@ wm.close = (id: string) => {
 // Start clock
 taskbar.start();
 
-// --- Boot screen dismiss ---
+// --- Boot screen (real progress: gates on fonts + first GPU frame) ---
 const bootScreen = document.getElementById('boot-screen');
-if (bootScreen) {
-  const bar = document.getElementById('boot-bar');
-  const status = document.getElementById('boot-status');
-  const messages = ['Inicializando sistema...', 'Carregando módulos...', 'Iniciando interface...', 'Pronto!'];
-  let step = 0;
-  const bootTick = () => {
-    if (step < messages.length) {
-      if (status) status.textContent = messages[step];
-      if (bar) bar.style.width = `${((step + 1) / messages.length) * 100}%`;
-      step++;
-      setTimeout(bootTick, 600);
-    } else {
-      bootScreen.classList.add('boot-hidden');
-      setTimeout(() => bootScreen.remove(), 700);
-    }
-  };
-  bootTick();
+const bootBar = document.getElementById('boot-bar');
+const bootStatus = document.getElementById('boot-status');
+
+let firstFrameResolve!: () => void;
+const firstFrame = new Promise<void>((resolve) => {
+  firstFrameResolve = resolve;
+});
+
+function setBootProgress(p: number, label: string) {
+  if (bootBar) bootBar.style.width = `${Math.round(p * 100)}%`;
+  if (bootStatus) bootStatus.textContent = label;
 }
+
+async function runBoot() {
+  if (!bootScreen) return;
+  setBootProgress(0.20, 'Renderer pronto');
+  await document.fonts.ready.catch(() => {});
+  setBootProgress(0.55, 'Fontes pixeladas carregadas');
+  await firstFrame;
+  setBootProgress(0.90, 'Shaders compilados');
+  setBootProgress(1.00, 'Pronto!');
+  // brief visible beat so the user can read "Pronto!" before the fade
+  await new Promise((r) => setTimeout(r, 250));
+  bootScreen.classList.add('boot-hidden');
+  setTimeout(() => bootScreen.remove(), 700);
+}
+
+void runBoot();
 
 // --- Loop ---
 let prevTime = 0;
+let firstFrameRendered = false;
 function animate(time: number) {
   const t = time * 0.001;
   const dt = Math.min(t - prevTime, 1 / 30);
   prevTime = t;
   wallpaper.update(t, dt);
   composer.render();
+  if (!firstFrameRendered) {
+    firstFrameRendered = true;
+    firstFrameResolve();
+  }
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);

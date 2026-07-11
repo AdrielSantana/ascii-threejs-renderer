@@ -69,6 +69,49 @@ img, canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
   .os-desktop { grid-template-columns: repeat(auto-fill, 76px); grid-auto-rows: 88px; }
 }
 
+/* desktop-grid (used by Desktop class) — flex wrap so cells don't span full width */
+.desktop-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  padding: 14px;
+}
+.desktop-icon-cell {
+  flex: none;
+  width: auto;
+  max-width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  cursor: pointer;
+  border: 1px dotted transparent;
+  touch-action: none;
+  pointer-events: none; /* only children receive events */
+}
+.desktop-icon-cell:active {
+  background: rgba(16, 132, 208, 0.4);
+  border-color: #fff;
+}
+.desktop-icon-img {
+  width: 32px;
+  height: 32px;
+  pointer-events: auto; /* clicks on the icon trigger the app */
+  image-rendering: pixelated;
+}
+.desktop-icon-label {
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+  font-size: 11px;
+  text-align: center;
+  word-break: break-word;
+  max-width: 80px;
+  line-height: 1.05;
+  pointer-events: auto; /* clicks on the label trigger the app */
+}
+
 .os-icon {
   display: flex;
   flex-direction: column;

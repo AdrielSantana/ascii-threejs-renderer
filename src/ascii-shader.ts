@@ -9,6 +9,7 @@ export interface AsciiConfig {
   brightness: number;
   fg: THREE.Color;
   bg: THREE.Color;
+  shape?: string;
 }
 
 export function parseAsciiConfig(search: URLSearchParams): AsciiConfig {
@@ -21,6 +22,7 @@ export function parseAsciiConfig(search: URLSearchParams): AsciiConfig {
     brightness: parseFloat(search.get('brightness') ?? '4.5'),
     fg: new THREE.Color(search.get('fg') ?? '#d6d0b8'),
     bg: new THREE.Color(search.get('bg') ?? '#050505'),
+    shape: search.get('shape') ?? undefined,
   };
 }
 
