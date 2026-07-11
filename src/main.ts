@@ -8,9 +8,12 @@ import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { parseAsciiConfig, createAsciiShader } from './ascii-shader';
 import { createWorld, terrainHeight } from './world';
 import { windUniforms } from './wind';
+import { createControlPanel } from './ui-controls';
+import { setupMobileControls } from './mobile-controls';
 
 // --- Debug params ---
 const config = parseAsciiConfig(new URLSearchParams(window.location.search));
+const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
 // --- Renderer ---
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -38,25 +41,49 @@ scene.add(camera);
 const world = createWorld(camera);
 scene.add(world.group);
 
-// --- First person controls ---
-const controls = new PointerLockControls(camera, renderer.domElement);
-scene.add(controls.getObject());
+// --- Controls: desktop (pointer lock) vs mobile (touch) ---
+let isLocked = false;
+const keys: Record<string, boolean> = {};
 
 const overlay = document.createElement('div');
-overlay.textContent = 'Clique para jogar';
+overlay.textContent = isMobile ? 'Toque para jogar' : 'Clique para jogar';
 overlay.style.cssText = [
   'position:fixed', 'inset:0', 'display:flex',
   'align-items:center', 'justify-content:center',
   'font:bold 24px monospace', 'color:#d6d0b8',
   'background:rgba(0,0,0,0.7)', 'cursor:pointer', 'z-index:100',
 ].join(';');
-overlay.addEventListener('click', () => controls.lock());
 document.body.appendChild(overlay);
-controls.addEventListener('lock', () => (overlay.style.display = 'none'));
-controls.addEventListener('unlock', () => (overlay.style.display = 'flex'));
+
+if (isMobile) {
+  // Mobile: no pointer lock, touch controls handle activation
+  setupMobileControls(camera, keys, renderer, () => {
+    isLocked = true;
+    overlay.style.display = 'none';
+  });
+  overlay.addEventListener('click', () => {
+    isLocked = true;
+    overlay.style.display = 'none';
+  });
+  // Camera stays directly in scene — no PointerLockControls
+} else {
+  // Desktop: PointerLockControls
+  const controls = new PointerLockControls(camera, renderer.domElement);
+  scene.add(controls.getObject());
+  overlay.addEventListener('click', () => controls.lock());
+  controls.addEventListener('lock', () => {
+    isLocked = true;
+    overlay.style.display = 'none';
+  });
+  controls.addEventListener('unlock', () => {
+    isLocked = false;
+    overlay.style.display = 'flex';
+  });
+  // Make controls accessible in animate loop
+  (window as any).__controls = controls;
+}
 
 // --- WASD movement ---
-const keys: Record<string, boolean> = {};
 window.addEventListener('keydown', (e) => (keys[e.code] = true));
 window.addEventListener('keyup', (e) => (keys[e.code] = false));
 
@@ -129,6 +156,9 @@ function resize() {
 resize();
 window.addEventListener('resize', resize);
 
+// --- Control panel ---
+createControlPanel(config, asciiPass, resize);
+
 // --- Loop ---
 let lastTime = performance.now();
 let fpsAccum = 0;
@@ -146,10 +176,10 @@ function animate(time: number) {
   const right = (keys['KeyD'] || keys['ArrowRight'] ? 1 : 0) - (keys['KeyA'] || keys['ArrowLeft'] ? 1 : 0);
   const moving = forward !== 0 || right !== 0;
 
-  if (controls.isLocked && moving) {
+  if (isLocked && moving) {
     const length = Math.hypot(forward, right) || 1;
     const speed = (keys['ShiftLeft'] || keys['ShiftRight'] ? 8.8 : 5.1) * dt;
-    const yaw = controls.getObject().rotation.y;
+    const yaw = isMobile ? camera.rotation.y : (window as any).__controls.getObject().rotation.y;
     const nextX = camera.position.x + ((-Math.sin(yaw) * forward + Math.cos(yaw) * right) / length) * speed;
     const nextZ = camera.position.z + ((-Math.cos(yaw) * forward - Math.sin(yaw) * right) / length) * speed;
     camera.position.x = THREE.MathUtils.clamp(nextX, -43, 43);
