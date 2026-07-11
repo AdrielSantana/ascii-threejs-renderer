@@ -182,15 +182,16 @@ void runBoot();
 // --- Loop ---
 let prevTime = 0;
 let firstFrameRendered = false;
-const BASE_CELL_SCALE = 30;   // high-res ASCII at rest
-const MORPH_CELL_SCALE = 75;  // low-res during morph (chars grow ~2.5x)
-let currentCellScale = BASE_CELL_SCALE;
+const VORTEX_CELL_SCALE = 30;   // vortex idle (medium-res)
+const SHAPE_CELL_SCALE = 75;   // shape idle (high-res, small chars)
+const MORPH_CELL_SCALE = 20;   // mid-morph (low-res, large chars)
+let currentCellScale = VORTEX_CELL_SCALE;
 
 function applyMorphCellScale(uMorph: number) {
-  // Bell curve: 0 at rest, peaks at mid-morph (uMorph=0.5)
-  const bell = Math.sin(uMorph * Math.PI);
-  const target = BASE_CELL_SCALE + (MORPH_CELL_SCALE - BASE_CELL_SCALE) * bell;
-  // Smooth toward target to avoid jitter
+  // V-curve: 30 (vortex) → 20 (mid-morph, chars large) → 75 (shape, high-res)
+  const target = uMorph < 0.5
+    ? VORTEX_CELL_SCALE + (MORPH_CELL_SCALE - VORTEX_CELL_SCALE) * (uMorph * 2)
+    : MORPH_CELL_SCALE + (SHAPE_CELL_SCALE - MORPH_CELL_SCALE) * ((uMorph - 0.5) * 2);
   currentCellScale += (target - currentCellScale) * 0.15;
   if (Math.abs(currentCellScale - config.cellScale) > 0.5) {
     config.cellScale = currentCellScale;
