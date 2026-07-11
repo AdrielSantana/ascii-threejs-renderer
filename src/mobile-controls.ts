@@ -129,12 +129,14 @@ export function setupMobileControls(
           clearMovementKeys();
         } else {
           const norm = Math.min((dist - DEAD_ZONE) / (MAX_DIST - DEAD_ZONE), 1);
-          const fwd = Math.sin(angle) * norm;   // up on screen = forward
-          const rgt = Math.cos(angle) * norm;   // right on screen = strafe right
-          keys['KeyW'] = fwd < -0.2;
-          keys['KeyS'] = fwd > 0.2;
-          keys['KeyA'] = rgt < -0.2;
-          keys['KeyD'] = rgt > 0.2;
+          // dy: negativo = dedo subiu na tela → frente (KeyW)
+          // dx: positivo = dedo foi pra direita → direita (KeyD)
+          const rawFwd = (-dy / dist) * norm;
+          const rawRgt = (dx / dist) * norm;
+          keys['KeyW'] = rawFwd > 0.2;
+          keys['KeyS'] = rawFwd < -0.2;
+          keys['KeyD'] = rawRgt > 0.2;
+          keys['KeyA'] = rawRgt < -0.2;
         }
       }
 
