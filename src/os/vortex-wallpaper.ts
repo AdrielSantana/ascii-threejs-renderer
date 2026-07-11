@@ -72,6 +72,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     uMorph: { value: forcedShape ? 1 : 0 },
     uShapeSpin: { value: new THREE.Matrix3() },
     uShapeSpin2: { value: new THREE.Matrix3() },
+    uDragRotation: { value: new THREE.Matrix3() },
   };
 
   // ── Particle shader material ──
@@ -90,6 +91,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       uniform float uMorph;
       uniform mat3 uShapeSpin;
       uniform mat3 uShapeSpin2;
+      uniform mat3 uDragRotation;
 
       attribute float aSeed;
       attribute float aSize;
@@ -168,7 +170,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
         vec3 vortexPos = sphereHome + fluid;
 
         // ── 3. targetPos: shape with rotation + per-particle boil ──
-        vec3 spunTarget = uShapeSpin2 * (uShapeSpin * aTarget);
+        vec3 spunTarget = uDragRotation * uShapeSpin2 * (uShapeSpin * aTarget);
         // boil — each particle displaces along its own seeded noise so the
         // shape "dissolves" rather than reading as a hard surface
         float boilAmp = 0.085;
@@ -291,6 +293,14 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
   let currentTimeS = 0;
   let lastInteractionS = 0;
 
+  // Drag-driven rotation (accumulates while dragging, decays on release)
+  let dragRotX = 0;
+  let dragRotY = 0;
+  let lastPointerX = 0;
+  let lastPointerY = 0;
+  const _dragRy = new THREE.Matrix3();
+  const _dragRx = new THREE.Matrix3();
+
   const trail: { position: THREE.Vector3; velocity: THREE.Vector3 }[] = Array.from(
     { length: TRAIL_COUNT },
     () => ({ position: new THREE.Vector3(), velocity: new THREE.Vector3() }),
@@ -342,11 +352,12 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
   function onPointerDown(e: PointerEvent) {
     if (!shouldHandleVortex(e.target)) return;
     lastInteractionS = currentTimeS;
-    triggerReturnToVortex();
     pointerActive = true;
     pointerId = e.pointerId;
     interactionLayer.setPointerCapture(e.pointerId);
     interactionLayer.classList.add('is-dragging');
+    lastPointerX = e.clientX;
+    lastPointerY = e.clientY;
     pointerToWorld(e.clientX, e.clientY);
     e.preventDefault();
   }
@@ -355,6 +366,13 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     // Hover (sem botão) também conta como interação p/ resetar o idle
     lastInteractionS = currentTimeS;
     if (!pointerActive || e.pointerId !== pointerId) return;
+    // Accumulate drag rotation: horizontal drag → Y rotation, vertical → X
+    const dx = e.clientX - lastPointerX;
+    const dy = e.clientY - lastPointerY;
+    lastPointerX = e.clientX;
+    lastPointerY = e.clientY;
+    dragRotY += dx * 0.006;
+    dragRotX += dy * 0.006;
     pointerToWorld(e.clientX, e.clientY);
     e.preventDefault();
   }
@@ -453,14 +471,6 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     generateShape(name, PARTICLE_COUNT, targetArray);
     geometry.attributes.aTarget.needsUpdate = true;
     currentShapeName = name;
-  }
-
-  function triggerReturnToVortex() {
-    if (phase === 'vortex_idle') return;
-    if (phase === 'morphing' && morphDir === -1) return;
-    phase = 'morphing';
-    morphDir = -1;
-    isTouchFading = true;
   }
 
   function advanceMorphState(t: number, dt: number) {
@@ -563,6 +573,19 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       advanceMorphState(t, dt);
     }
 
+    // Decay drag rotation when not dragging (eases back to base spin)
+    if (!pointerActive) {
+      const decay = Math.exp(-2.2 * dt);
+      dragRotX *= decay;
+      dragRotY *= decay;
+    }
+    // Build uDragRotation = Ry(dragRotY) * Rx(dragRotX)
+    const cx = Math.cos(dragRotX), sx = Math.sin(dragRotX);
+    const cy = Math.cos(dragRotY), sy = Math.sin(dragRotY);
+    _dragRy.set(cy, 0, sy, 0, 1, 0, -sy, 0, cy);
+    _dragRx.set(1, 0, 0, 0, cx, -sx, 0, sx, cx);
+    (uniforms.uDragRotation.value as THREE.Matrix3).multiplyMatrices(_dragRy, _dragRx);
+
     uniforms.uTime.value = t;
     uniforms.uInteraction.value = interaction;
     uniforms.uVelocity.value.copy(trail[0].velocity);
@@ -585,6 +608,9 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       shapeIdx,
       currentShapeName: currentShapeName ?? null,
       forcedShape: forcedShape ?? null,
+      dragRotX,
+      dragRotY,
+      pointerActive,
     }),
   };
 }
