@@ -12,10 +12,15 @@ import { Taskbar } from './os/taskbar';
 import { registerApp, listApps, getApp } from './os/apps/registry';
 import { notepadApp } from './os/apps/notepad';
 import { aboutApp } from './os/apps/about';
+import { terminalApp } from './os/apps/terminal';
+import { settingsApp } from './os/apps/settings';
+import { paintApp } from './os/apps/paint';
+import { snakeApp } from './os/apps/snake';
+import { initSettings } from './os/settings-store';
 
 // --- Config ---
 const config = parseAsciiConfig(new URLSearchParams());
-config.cellScale = 70; // larger ASCII characters / lower resolution
+config.cellScale = 120; // extra large ASCII characters / very low resolution
 
 // --- Renderer ---
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -34,6 +39,9 @@ composer.addPass(new RenderPass(wallpaper.scene, wallpaper.camera));
 
 const asciiPass = new ShaderPass(createAsciiShader(config));
 composer.addPass(asciiPass);
+
+// Initialize settings store for live control
+initSettings(asciiPass, handleCellScaleChange);
 
 const outputPass = new OutputPass();
 composer.addPass(outputPass);
@@ -57,6 +65,12 @@ function resize() {
 resize();
 window.addEventListener('resize', resize);
 
+// Callback for settings cellScale changes
+function handleCellScaleChange(scale: number) {
+  config.cellScale = scale;
+  resize();
+}
+
 // --- OS UI ---
 const uiRoot = document.createElement('div');
 uiRoot.id = 'os-ui';
@@ -75,6 +89,10 @@ const taskbar = new Taskbar(uiRoot, { onAppTap: (id: string) => {
 // Register apps
 registerApp(notepadApp);
 registerApp(aboutApp);
+registerApp(terminalApp);
+registerApp(settingsApp);
+registerApp(paintApp);
+registerApp(snakeApp);
 
 // Build desktop icons
 const desktopIcons = listApps().map((app) => ({
@@ -123,6 +141,27 @@ wm.close = (id: string) => {
 
 // Start clock
 taskbar.start();
+
+// --- Boot screen dismiss ---
+const bootScreen = document.getElementById('boot-screen');
+if (bootScreen) {
+  const bar = document.getElementById('boot-bar');
+  const status = document.getElementById('boot-status');
+  const messages = ['Inicializando sistema...', 'Carregando módulos...', 'Iniciando interface...', 'Pronto!'];
+  let step = 0;
+  const bootTick = () => {
+    if (step < messages.length) {
+      if (status) status.textContent = messages[step];
+      if (bar) bar.style.width = `${((step + 1) / messages.length) * 100}%`;
+      step++;
+      setTimeout(bootTick, 600);
+    } else {
+      bootScreen.classList.add('boot-hidden');
+      setTimeout(() => bootScreen.remove(), 700);
+    }
+  };
+  bootTick();
+}
 
 // --- Loop ---
 function animate(time: number) {

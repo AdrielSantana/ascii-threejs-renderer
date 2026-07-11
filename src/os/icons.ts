@@ -18,6 +18,12 @@ export function createIcon(name: string, size = 32): HTMLCanvasElement {
     case 'settings':
       drawSettings(ctx, size);
       break;
+    case 'paint':
+      drawPaint(ctx, size);
+      break;
+    case 'snake':
+      drawSnake(ctx, size);
+      break;
     default:
       drawGeneric(ctx, size);
   }
@@ -74,6 +80,37 @@ function drawSettings(ctx: CanvasRenderingContext2D, size: number) {
   ctx.beginPath();
   ctx.arc(s / 2, s / 2, 4, 0, Math.PI * 2);
   ctx.fill();
+}
+
+function drawPaint(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, s, s);
+  ctx.fillStyle = '#ff2a86';
+  ctx.fillRect(4, 4, s - 8, s - 8);
+  ctx.fillStyle = '#00f0ff';
+  ctx.fillRect(8, 8, 12, 12);
+  ctx.fillStyle = '#00ff00';
+  ctx.fillRect(14, 14, 10, 10);
+  ctx.fillStyle = '#ffff00';
+  ctx.fillRect(6, 20, 8, 8);
+}
+
+function drawSnake(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size;
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, s, s);
+  ctx.fillStyle = '#00ff00';
+  ctx.fillRect(6, 16, 4, 4);
+  ctx.fillRect(10, 12, 4, 4);
+  ctx.fillRect(14, 8, 4, 4);
+  ctx.fillRect(14, 4, 4, 4);
+  ctx.fillStyle = '#ff2a86';
+  ctx.fillRect(20, 14, 6, 6);
+  // Eyes
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(10, 12, 2, 2);
+  ctx.fillRect(12, 12, 2, 2);
 }
 
 function drawGeneric(ctx: CanvasRenderingContext2D, size: number) {
