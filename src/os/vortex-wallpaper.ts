@@ -71,6 +71,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     uTrail: { value: trailArray },
     uMorph: { value: forcedShape ? 1 : 0 },
     uShapeSpin: { value: new THREE.Matrix3() },
+    uShapeSpin2: { value: new THREE.Matrix3() },
   };
 
   // ── Particle shader material ──
@@ -88,6 +89,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       uniform vec3 uTrail[${TRAIL_COUNT}];
       uniform float uMorph;
       uniform mat3 uShapeSpin;
+      uniform mat3 uShapeSpin2;
 
       attribute float aSeed;
       attribute float aSize;
@@ -113,51 +115,74 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
         return uTrail[5];
       }
 
+      // inline hash + value noise (GLSL ES 1.00 has no built-in noise)
+      float hash11(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+      float noise1(float x) {
+        float i = floor(x);
+        float f = fract(x);
+        float u = f * f * (3.0 - 2.0 * f);
+        return mix(hash11(i), hash11(i + 1.0), u) * 2.0 - 1.0;
+      }
+
       void main() {
-        vec3 p = position;
-        float radius = length(p);
+        // ── 1. sphereHome: base sphere with slow waves/spin (no trail) ──
+        vec3 sphereHome = position;
+        float radius = length(sphereHome);
         float normalizedRadius = radius / 2.18;
         float core = 1.0 - smoothstep(0.05, 1.0, normalizedRadius);
 
         float spinSpeed = mix(1.05, 0.24, normalizedRadius);
-        float spin = uTime * spinSpeed + p.y * 1.28 + aSeed * 6.2831853;
-        p.xz = rotate2D(spin) * p.xz;
+        float spin = uTime * spinSpeed + sphereHome.y * 1.28 + aSeed * 6.2831853;
+        sphereHome.xz = rotate2D(spin) * sphereHome.xz;
 
-        float waveA = sin(uTime * 1.15 + aSeed * 19.0 + p.y * 3.4);
+        float waveA = sin(uTime * 1.15 + aSeed * 19.0 + sphereHome.y * 3.4);
         float waveB = cos(uTime * 0.78 + aSeed * 11.0 + radius * 5.2);
         float turbulence = (0.025 + core * 0.075) * (0.35 + uInteraction * 0.65);
-        p += vec3(waveA * turbulence, waveB * turbulence * 0.72, (waveA + waveB) * turbulence * 0.45);
+        sphereHome += vec3(
+          waveA * turbulence,
+          waveB * turbulence * 0.72,
+          (waveA + waveB) * turbulence * 0.45
+        );
 
-        float equator = 1.0 - smoothstep(0.25, 1.9, abs(p.y));
-        p.xz *= 0.87 + equator * 0.17;
-        p.y += sin(spin * 2.0 + uTime * 0.7) * 0.045 * (1.0 - normalizedRadius);
+        float equator = 1.0 - smoothstep(0.25, 1.9, abs(sphereHome.y));
+        sphereHome.xz *= 0.87 + equator * 0.17;
+        sphereHome.y += sin(spin * 2.0 + uTime * 0.7) * 0.045 * (1.0 - normalizedRadius);
+
+        // ── 2. fluid offset: trail + shear (dragTwist excluded — too distorting on shapes) ──
+        vec3 fluid = vec3(0.0);
 
         vec3 head = uTrail[0];
         vec3 delayed = getTrailPoint(aFollow);
         vec3 flowCenter = mix(head, delayed, 0.76);
-        float depthLag = smoothstep(-2.2, 2.2, p.z);
+        float depthLag = smoothstep(-2.2, 2.2, sphereHome.z);
         flowCenter -= uVelocity * (0.028 + 0.105 * aFollow) * (0.45 + depthLag);
-        p += flowCenter;
+        fluid += flowCenter;
 
         float speed = min(length(uVelocity), 8.0);
         vec2 direction = normalize(uVelocity.xy + vec2(0.0001));
         vec2 tangent = vec2(-direction.y, direction.x);
         float shear = speed * 0.025 * (aFollow - 0.35) * (1.0 - normalizedRadius * 0.55);
-        p.xy += tangent * shear;
+        fluid.xy += tangent * shear;
 
-        float dragTwist = uInteraction * speed * 0.035 * (1.0 - normalizedRadius);
-        p.xy = rotate2D(dragTwist * (aFollow - 0.5)) * p.xy;
+        // Vortex mode gets the full physics baked in; shape mode adds fluid on top.
+        vec3 vortexPos = sphereHome + fluid;
 
-        // ── Morph toward target shape (uMorph=0 → pure vortex, 1 → target) ──
-        vec3 spunTarget = uShapeSpin * aTarget;
-        // breathing so shapes don't feel frozen
-        vec3 breath = vec3(
-          sin(uTime * 0.9 + aSeed * 8.0),
-          sin(uTime * 0.7 + aSeed * 6.0),
-          sin(uTime * 1.1 + aSeed * 9.0)
-        ) * 0.025;
-        vec3 morphTarget = spunTarget + breath * uMorph;
-        vec3 finalPos = mix(p, morphTarget, uMorph);
+        // ── 3. targetPos: shape with rotation + per-particle boil ──
+        vec3 spunTarget = uShapeSpin2 * (uShapeSpin * aTarget);
+        // boil — each particle displaces along its own seeded noise so the
+        // shape "dissolves" rather than reading as a hard surface
+        float boilAmp = 0.085;
+        vec3 boil = vec3(
+          noise1(aSeed * 17.0 + uTime * 0.95),
+          noise1(aSeed * 31.0 + uTime * 1.15),
+          noise1(aSeed * 53.0 + uTime * 1.05)
+        ) * boilAmp;
+        vec3 targetPos = spunTarget + boil;
+
+        // ── 4. combine: morph between sphereHome (vortex identity) and
+        //    targetPos (shape), keeping fluid always additive so trail/drag
+        //    affect both modes identically
+        vec3 finalPos = mix(sphereHome, targetPos, uMorph) + fluid;
 
         vec4 mvPosition = modelViewMatrix * vec4(finalPos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
@@ -372,16 +397,56 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
   }
 
   function applyShapeSpin(name: ShapeName | undefined, t: number) {
-    const m = uniforms.uShapeSpin.value as THREE.Matrix3;
-    if (!name || name !== 'galaxy') {
-      m.identity();
+    const m1 = uniforms.uShapeSpin.value as THREE.Matrix3;
+    const m2 = uniforms.uShapeSpin2.value as THREE.Matrix3;
+    if (!name) {
+      m1.identity();
+      m2.identity();
       return;
     }
-    // Y-axis rotation by t * 0.15 (only galaxy has inherent spin)
-    const angle = t * 0.15;
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
-    m.set(c, 0, s, 0, 1, 0, -s, 0, c);
+    switch (name) {
+      case 'galaxy': {
+        // Y-axis rotation only (flat disk should stay flat)
+        const a = t * 0.18;
+        const c = Math.cos(a), s = Math.sin(a);
+        m1.set(c, 0, s, 0, 1, 0, -s, 0, c);
+        m2.identity();
+        break;
+      }
+      case 'cube': {
+        // Multi-axis tumble (Y primary, X secondary)
+        const ax = t * 0.07;
+        const ay = t * 0.05;
+        const cx = Math.cos(ax), sx = Math.sin(ax);
+        const cy = Math.cos(ay), sy = Math.sin(ay);
+        // Y rotation
+        m1.set(cy, 0, sy, 0, 1, 0, -sy, 0, cy);
+        // X rotation
+        m2.set(1, 0, 0, 0, cx, -sx, 0, sx, cx);
+        break;
+      }
+      case 'torus': {
+        // Steady Y spin
+        const a = t * 0.22;
+        const c = Math.cos(a), s = Math.sin(a);
+        m1.set(c, 0, s, 0, 1, 0, -s, 0, c);
+        // Small Z wobble so the ring breathes
+        const az = t * 0.10;
+        const cz = Math.cos(az), sz = Math.sin(az);
+        m2.set(cz, -sz, 0, sz, cz, 0, 0, 0, 1);
+        break;
+      }
+      case 'torusKnot': {
+        // X + Y compound
+        const ax = t * 0.13;
+        const ay = t * 0.10;
+        const cx = Math.cos(ax), sx = Math.sin(ax);
+        const cy = Math.cos(ay), sy = Math.sin(ay);
+        m1.set(cy, 0, sy, 0, 1, 0, -sy, 0, cy);
+        m2.set(1, 0, 0, 0, cx, -sx, 0, sx, cx);
+        break;
+      }
+    }
   }
 
   function loadShape(name: ShapeName) {
