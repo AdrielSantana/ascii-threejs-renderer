@@ -182,11 +182,36 @@ void runBoot();
 // --- Loop ---
 let prevTime = 0;
 let firstFrameRendered = false;
+const BASE_CELL_SCALE = 30;   // high-res ASCII at rest
+const MORPH_CELL_SCALE = 75;  // low-res during morph (chars grow ~2.5x)
+let currentCellScale = BASE_CELL_SCALE;
+
+function applyMorphCellScale(uMorph: number) {
+  // Bell curve: 0 at rest, peaks at mid-morph (uMorph=0.5)
+  const bell = Math.sin(uMorph * Math.PI);
+  const target = BASE_CELL_SCALE + (MORPH_CELL_SCALE - BASE_CELL_SCALE) * bell;
+  // Smooth toward target to avoid jitter
+  currentCellScale += (target - currentCellScale) * 0.15;
+  if (Math.abs(currentCellScale - config.cellScale) > 0.5) {
+    config.cellScale = currentCellScale;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const pr = Math.min(window.devicePixelRatio, 1.5);
+    const shorter = Math.min(w, h);
+    const cellH = shorter / currentCellScale;
+    const cellW = cellH * 6 / 9;
+    asciiPass.uniforms.uCellSize.value.set(cellW * pr, cellH * pr);
+  }
+  (window as any).__cellScale = currentCellScale;
+}
+
 function animate(time: number) {
   const t = time * 0.001;
   const dt = Math.min(t - prevTime, 1 / 30);
   prevTime = t;
   wallpaper.update(t, dt);
+  const morphState = wallpaper.getMorphState?.();
+  if (morphState) applyMorphCellScale(morphState.uMorph);
   composer.render();
   if (!firstFrameRendered) {
     firstFrameRendered = true;

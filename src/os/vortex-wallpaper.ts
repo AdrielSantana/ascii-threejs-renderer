@@ -73,6 +73,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     uShapeSpin: { value: new THREE.Matrix3() },
     uShapeSpin2: { value: new THREE.Matrix3() },
     uDragRotation: { value: new THREE.Matrix3() },
+    uShapeScale: { value: 1 },
   };
 
   // ── Particle shader material ──
@@ -92,6 +93,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       uniform mat3 uShapeSpin;
       uniform mat3 uShapeSpin2;
       uniform mat3 uDragRotation;
+      uniform float uShapeScale;
 
       attribute float aSeed;
       attribute float aSize;
@@ -170,7 +172,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
         vec3 vortexPos = sphereHome + fluid;
 
         // ── 3. targetPos: shape with rotation + per-particle boil ──
-        vec3 spunTarget = uDragRotation * uShapeSpin2 * (uShapeSpin * aTarget);
+        vec3 spunTarget = uDragRotation * uShapeSpin2 * (uShapeSpin * (aTarget * uShapeScale));
         // boil — each particle displaces along its own seeded noise so the
         // shape "dissolves" rather than reading as a hard surface
         float boilAmp = 0.085;
@@ -610,6 +612,15 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
   function resize(newWidth: number, newHeight: number) {
     camera.aspect = newWidth / newHeight;
     camera.updateProjectionMatrix();
+    // Scale shapes relative to device: smaller on narrow/portrait screens
+    // so they don't dominate; full size on landscape/desktop.
+    const aspect = newWidth / newHeight;
+    const scale = aspect < 1
+      ? Math.max(0.55, aspect * 0.85)  // portrait: shrink
+      : aspect < 1.6
+        ? 0.85 + (aspect - 1) * 0.25   // square-ish: mild shrink
+        : 0.9;                          // landscape: near full
+    uniforms.uShapeScale.value = scale;
   }
 
   return {
