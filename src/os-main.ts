@@ -4,6 +4,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { parseAsciiConfig, createAsciiShader } from './ascii-shader';
+import { windUniforms } from './wind';
 import { createWallpaper } from './os/wallpaper';
 import { WindowManager } from './os/window-manager';
 import { Desktop } from './os/desktop';
@@ -125,6 +126,7 @@ taskbar.start();
 // --- Loop ---
 function animate(time: number) {
   const t = time * 0.001;
+  windUniforms.uTime.value = t;
   wallpaper.update(t, 0);
   composer.render();
   requestAnimationFrame(animate);
