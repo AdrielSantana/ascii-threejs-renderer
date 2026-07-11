@@ -4,8 +4,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { parseAsciiConfig, createAsciiShader } from './ascii-shader';
-import { windUniforms } from './wind';
-import { createWallpaper } from './os/wallpaper';
+import { createVortexWallpaper } from './os/vortex-wallpaper';
 import { WindowManager } from './os/window-manager';
 import { Desktop } from './os/desktop';
 import { Taskbar } from './os/taskbar';
@@ -31,7 +30,7 @@ renderer.domElement.id = 'os-canvas';
 document.body.appendChild(renderer.domElement);
 
 // --- Wallpaper ---
-const wallpaper = createWallpaper(window.innerWidth, window.innerHeight);
+const wallpaper = createVortexWallpaper(window.innerWidth, window.innerHeight);
 
 // --- Post-processing ---
 const composer = new EffectComposer(renderer);
@@ -164,10 +163,12 @@ if (bootScreen) {
 }
 
 // --- Loop ---
+let prevTime = 0;
 function animate(time: number) {
   const t = time * 0.001;
-  windUniforms.uTime.value = t;
-  wallpaper.update(t, 0);
+  const dt = Math.min(t - prevTime, 1 / 30);
+  prevTime = t;
+  wallpaper.update(t, dt);
   composer.render();
   requestAnimationFrame(animate);
 }
