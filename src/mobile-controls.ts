@@ -129,7 +129,7 @@ export function setupMobileControls(
           clearMovementKeys();
         } else {
           const norm = Math.min((dist - DEAD_ZONE) / (MAX_DIST - DEAD_ZONE), 1);
-          const fwd = -Math.sin(angle) * norm; // up on screen = forward
+          const fwd = Math.sin(angle) * norm;   // up on screen = forward
           const rgt = Math.cos(angle) * norm;   // right on screen = strafe right
           keys['KeyW'] = fwd < -0.2;
           keys['KeyS'] = fwd > 0.2;

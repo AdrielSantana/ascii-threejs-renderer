@@ -111,23 +111,23 @@ export function createControlPanel(
   });
   panel.appendChild(charsetInput);
 
-  // ===== CELL SIZE =====
-  panel.appendChild(section('Cell Size'));
-  const cellWctrl = range(2, 20, 1, config.cellW, (v) => {
+  // ===== RESOLUTION =====
+  panel.appendChild(section('Resolution'));
+  const cellWctrl = range(40, 600, 10, config.cellW, (v) => {
     config.cellW = v;
     const pr = Math.min(window.devicePixelRatio, 1.5);
-    u.uCellSize.value.set(v * pr, config.cellH * pr);
+    u.uCellSize.value.set((window.innerWidth / v) * pr, (window.innerHeight / config.cellH) * pr);
     onCellSizeChange();
   });
-  panel.appendChild(row('Width', cellWctrl.container));
+  panel.appendChild(row('Columns', cellWctrl.container));
 
-  const cellHctrl = range(2, 20, 1, config.cellH, (v) => {
+  const cellHctrl = range(20, 300, 5, config.cellH, (v) => {
     config.cellH = v;
     const pr = Math.min(window.devicePixelRatio, 1.5);
-    u.uCellSize.value.set(config.cellW * pr, v * pr);
+    u.uCellSize.value.set((window.innerWidth / config.cellW) * pr, (window.innerHeight / v) * pr);
     onCellSizeChange();
   });
-  panel.appendChild(row('Height', cellHctrl.container));
+  panel.appendChild(row('Rows', cellHctrl.container));
 
   // ===== COLORS =====
   panel.appendChild(section('Colors'));
@@ -203,9 +203,9 @@ export function createControlPanel(
     charsetInput.value = ' .,:;irsXA253hMHGS#9B&@';
     charsetInput.dispatchEvent(new Event('change'));
     // Cell size
-    cellWctrl.input.value = '6'; cellWctrl.val.textContent = '6';
+    cellWctrl.input.value = '320'; cellWctrl.val.textContent = '320';
     cellWctrl.input.dispatchEvent(new Event('input'));
-    cellHctrl.input.value = '9'; cellHctrl.val.textContent = '9';
+    cellHctrl.input.value = '120'; cellHctrl.val.textContent = '120';
     cellHctrl.input.dispatchEvent(new Event('input'));
     // Image
     ctrlR.input.value = '1.5'; ctrlR.val.textContent = '1.50';

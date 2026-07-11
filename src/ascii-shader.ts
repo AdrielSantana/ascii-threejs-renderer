@@ -14,8 +14,8 @@ export interface AsciiConfig {
 
 export function parseAsciiConfig(search: URLSearchParams): AsciiConfig {
   return {
-    cellW: parseFloat(search.get('cellW') ?? '6'),
-    cellH: parseFloat(search.get('cellH') ?? '9'),
+    cellW: parseFloat(search.get('cellW') ?? '320'),
+    cellH: parseFloat(search.get('cellH') ?? '120'),
     charset: search.get('charset') ?? ' .,:;irsXA253hMHGS#9B&@',
     colorized: search.get('colorized') !== 'false',
     contrast: parseFloat(search.get('contrast') ?? '1.5'),
@@ -56,7 +56,7 @@ export function createAsciiShader(config: AsciiConfig) {
       tDiffuse: { value: null },
       uGlyphAtlas: { value: createGlyphAtlas(config.charset) },
       uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-      uCellSize: { value: new THREE.Vector2(config.cellW, config.cellH) },
+      uCellSize: { value: new THREE.Vector2(window.innerWidth / config.cellW, window.innerHeight / config.cellH) },
       uGlyphCount: { value: config.charset.length },
       uForeground: { value: config.fg },
       uBackground: { value: config.bg },

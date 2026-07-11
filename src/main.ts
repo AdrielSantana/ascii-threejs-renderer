@@ -149,7 +149,10 @@ function resize() {
   composer.setPixelRatio(pr);
   composer.setSize(w, h);
   asciiPass.uniforms.uResolution.value.set(w * pr, h * pr);
-  asciiPass.uniforms.uCellSize.value.set(config.cellW * pr, config.cellH * pr);
+  asciiPass.uniforms.uCellSize.value.set(
+    (w / config.cellW) * pr,
+    (h / config.cellH) * pr,
+  );
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -203,8 +206,8 @@ function animate(time: number) {
     debug.fps = Math.round(fpsAccum / fpsCount);
     debug.ms = +(dt * 1000).toFixed(2);
     debug.frames++;
-    const cellsX = Math.floor(window.innerWidth / config.cellW);
-    const cellsY = Math.floor(window.innerHeight / config.cellH);
+    const cellsX = config.cellW;
+    const cellsY = config.cellH;
     debug.cells = cellsX * cellsY;
     const p = camera.position;
     debug.pos = { x: +p.x.toFixed(1), y: +p.y.toFixed(1), z: +p.z.toFixed(1) };
