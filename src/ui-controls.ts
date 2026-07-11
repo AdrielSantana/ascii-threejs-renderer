@@ -113,7 +113,7 @@ export function createControlPanel(
 
   // ===== RESOLUTION =====
   panel.appendChild(section('Resolution'));
-  const scaleCtrl = range(30, 300, 5, config.cellScale, (v) => {
+  const scaleCtrl = range(20, 150, 5, config.cellScale, (v) => {
     config.cellScale = v;
     const pr = Math.min(window.devicePixelRatio, 1.5);
     const shorter = Math.min(window.innerWidth, window.innerHeight);
