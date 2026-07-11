@@ -144,15 +144,15 @@ function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   const pr = Math.min(window.devicePixelRatio, 1.5);
+  const shorter = Math.min(w, h);
+  const cellH = shorter / config.cellScale;
+  const cellW = cellH * 6 / 9; // mantém proporção 6:9 do caractere
   renderer.setPixelRatio(pr);
   renderer.setSize(w, h);
   composer.setPixelRatio(pr);
   composer.setSize(w, h);
   asciiPass.uniforms.uResolution.value.set(w * pr, h * pr);
-  asciiPass.uniforms.uCellSize.value.set(
-    (w / config.cellW) * pr,
-    (h / config.cellH) * pr,
-  );
+  asciiPass.uniforms.uCellSize.value.set(cellW * pr, cellH * pr);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -206,8 +206,11 @@ function animate(time: number) {
     debug.fps = Math.round(fpsAccum / fpsCount);
     debug.ms = +(dt * 1000).toFixed(2);
     debug.frames++;
-    const cellsX = config.cellW;
-    const cellsY = config.cellH;
+    const shorter = Math.min(window.innerWidth, window.innerHeight);
+    const cellH = shorter / config.cellScale;
+    const cellW = cellH * 6 / 9;
+    const cellsX = Math.floor(window.innerWidth / cellW);
+    const cellsY = Math.floor(window.innerHeight / cellH);
     debug.cells = cellsX * cellsY;
     const p = camera.position;
     debug.pos = { x: +p.x.toFixed(1), y: +p.y.toFixed(1), z: +p.z.toFixed(1) };
@@ -218,7 +221,7 @@ function animate(time: number) {
       `cells: ${debug.cells} (${cellsX}x${cellsY})`,
       `pos: ${debug.pos.x}, ${debug.pos.y}, ${debug.pos.z}`,
       `ascii: ${asciiEnabled ? 'ON' : 'OFF'}`,
-      `cfg: cell=${config.cellW}x${config.cellH} color=${config.colorized}`,
+      `cfg: scale=${config.cellScale} color=${config.colorized}`,
     ].join('\n');
     fpsAccum = 0;
     fpsCount = 0;
