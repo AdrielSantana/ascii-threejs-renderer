@@ -83,7 +83,7 @@ export function createWallpaper(width: number, height: number) {
     uniforms: {
       topColor: { value: new THREE.Color(0.06, 0.02, 0.22) },
       middleColor: { value: new THREE.Color(0.95, 0.18, 0.55) },
-      bottomColor: { value: THREE.Color.NAMES.orangered || new THREE.Color(1.0, 0.42, 0.12) },
+      bottomColor: { value: new THREE.Color(1.0, 0.42, 0.12) },
     },
     vertexShader: `
       varying vec2 vUv;
