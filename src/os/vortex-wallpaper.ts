@@ -295,18 +295,19 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
   let currentTimeS = 0;
   let lastInteractionS = 0;
 
-  // Drag-driven rotation (accumulates while dragging, decays on release)
-  let dragRotX = 0;
-  let dragRotY = 0;
+  // Drag-driven rotation via quaternion (no gimbal lock on diagonal drag)
+  const dragQuat = new THREE.Quaternion();
+  const dragAxis = new THREE.Vector3();
+  const dragDeltaQuat = new THREE.Quaternion();
   let lastPointerX = 0;
   let lastPointerY = 0;
-  // Angular velocity for flick momentum (rad/s, continues after release)
-  let angularVelX = 0;
-  let angularVelY = 0;
-  let prevDragRotX = 0;
-  let prevDragRotY = 0;
-  const _dragRy = new THREE.Matrix3();
-  const _dragRx = new THREE.Matrix3();
+  // Angular velocity vector for flick momentum (rad/s, continues after release)
+  const angularVel = new THREE.Vector3();
+  const prevDragQuat = new THREE.Quaternion();
+  const _tmpQuatA = new THREE.Quaternion();
+  const _tmpQuatB = new THREE.Quaternion();
+  const _tmpMat3 = new THREE.Matrix3();
+  const _tmpMat4 = new THREE.Matrix4();
 
   const trail: { position: THREE.Vector3; velocity: THREE.Vector3 }[] = Array.from(
     { length: TRAIL_COUNT },
@@ -373,13 +374,22 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     // Hover (sem botão) também conta como interação p/ resetar o idle
     lastInteractionS = currentTimeS;
     if (!pointerActive || e.pointerId !== pointerId) return;
-    // Accumulate drag rotation: horizontal drag → Y rotation, vertical → X
+    // Drag delta → incremental quaternion rotation.
+    // Axis is perpendicular to drag direction in screen plane:
+    //   drag right (+dx) → rotate around Y; drag down (+dy) → rotate around X.
+    // Combined diagonal drags produce a single rotation around the
+    // perpendicular axis, avoiding gimbal lock.
     const dx = e.clientX - lastPointerX;
     const dy = e.clientY - lastPointerY;
     lastPointerX = e.clientX;
     lastPointerY = e.clientY;
-    dragRotY += dx * 0.006;
-    dragRotX += dy * 0.006;
+    const angle = Math.hypot(dx, dy) * 0.006;
+    if (angle > 1e-5) {
+      // axis = (dy, dx, 0) normalized — note sign so drag right → +Y rot
+      dragAxis.set(dy, dx, 0).normalize();
+      dragDeltaQuat.setFromAxisAngle(dragAxis, angle);
+      dragQuat.premultiply(dragDeltaQuat);
+    }
     pointerToWorld(e.clientX, e.clientY);
     e.preventDefault();
   }
@@ -580,29 +590,47 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       advanceMorphState(t, dt);
     }
 
-    // Track angular velocity during drag (delta of dragRot per frame)
+    // Track angular velocity during drag via quaternion delta
     if (pointerActive) {
-      const dx = dragRotX - prevDragRotX;
-      const dy = dragRotY - prevDragRotY;
+      // delta quaternion from prevDragQuat → dragQuat this frame
+      _tmpQuatA.copy(prevDragQuat).invert();
+      _tmpQuatB.multiplyQuaternions(dragQuat, _tmpQuatA);
+      // Extract axis-angle: angle = 2*acos(|w|), axis = xyz/|xyz| * sign(w)
+      const w = _tmpQuatB.w;
+      const aw = Math.min(1, Math.abs(w));
+      const angle = 2 * Math.acos(aw);
+      const invDt = 1 / Math.max(dt, 1e-4);
+      const sign = w >= 0 ? 1 : -1;
+      const newVx = _tmpQuatB.x * sign * angle * invDt;
+      const newVy = _tmpQuatB.y * sign * angle * invDt;
+      const newVz = _tmpQuatB.z * sign * angle * invDt;
       // Smooth toward new velocity (avoid single-frame spikes)
-      angularVelX = angularVelX * 0.6 + (dx / Math.max(dt, 1e-4)) * 0.4;
-      angularVelY = angularVelY * 0.6 + (dy / Math.max(dt, 1e-4)) * 0.4;
+      angularVel.x = angularVel.x * 0.6 + newVx * 0.4;
+      angularVel.y = angularVel.y * 0.6 + newVy * 0.4;
+      angularVel.z = angularVel.z * 0.6 + newVz * 0.4;
     } else {
       // Flick momentum: continue spinning in drag direction, light friction
-      dragRotX += angularVelX * dt;
-      dragRotY += angularVelY * dt;
+      const speed = angularVel.length();
+      if (speed > 1e-4) {
+        dragAxis.copy(angularVel).normalize();
+        const angle = speed * dt;
+        dragDeltaQuat.setFromAxisAngle(dragAxis, angle);
+        dragQuat.premultiply(dragDeltaQuat);
+      }
       const friction = Math.exp(-0.4 * dt);
-      angularVelX *= friction;
-      angularVelY *= friction;
+      angularVel.multiplyScalar(friction);
     }
-    prevDragRotX = dragRotX;
-    prevDragRotY = dragRotY;
-    // Build uDragRotation = Ry(dragRotY) * Rx(dragRotX)
-    const cx = Math.cos(dragRotX), sx = Math.sin(dragRotX);
-    const cy = Math.cos(dragRotY), sy = Math.sin(dragRotY);
-    _dragRy.set(cy, 0, sy, 0, 1, 0, -sy, 0, cy);
-    _dragRx.set(1, 0, 0, 0, cx, -sx, 0, sx, cx);
-    (uniforms.uDragRotation.value as THREE.Matrix3).multiplyMatrices(_dragRy, _dragRx);
+    prevDragQuat.copy(dragQuat);
+    // Convert dragQuat → mat3 for the shader uniform (Matrix4 path —
+    // Matrix3 has no makeRotationFromQuaternion in three 0.160)
+    _tmpMat4.makeRotationFromQuaternion(dragQuat);
+    const me = _tmpMat4.elements;
+    _tmpMat3.set(
+      me[0], me[4], me[8],
+      me[1], me[5], me[9],
+      me[2], me[6], me[10],
+    );
+    (uniforms.uDragRotation.value as THREE.Matrix3).copy(_tmpMat3);
 
     uniforms.uTime.value = t;
     uniforms.uInteraction.value = interaction;
@@ -635,10 +663,8 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       shapeIdx,
       currentShapeName: currentShapeName ?? null,
       forcedShape: forcedShape ?? null,
-      dragRotX,
-      dragRotY,
-      angularVelX,
-      angularVelY,
+      dragQuat: { x: dragQuat.x, y: dragQuat.y, z: dragQuat.z, w: dragQuat.w },
+      angularVel: { x: angularVel.x, y: angularVel.y, z: angularVel.z },
       pointerActive,
     }),
   };
