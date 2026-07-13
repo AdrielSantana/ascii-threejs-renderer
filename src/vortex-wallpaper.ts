@@ -320,10 +320,6 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     'position:fixed;inset:0;z-index:1;touch-action:none;pointer-events:auto;';
   interactionLayer.id = 'vortex-interaction';
 
-  // Insert right after the canvas (before OS UI so we don't steal events from it)
-  // Wait for DOM — the canvas may not exist yet. We insert in update() or at timout.
-  // Instead, use a small delay or check on first frame.
-
   function pointerToWorld(clientX: number, clientY: number) {
     const rect = interactionLayer.getBoundingClientRect();
     pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -340,25 +336,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     pointerDesired.copy(intersection);
   }
 
-  function shouldHandleVortex(el: EventTarget | null): boolean {
-    if (!el) return false;
-    const target = el as HTMLElement;
-    // Exclude OS UI elements
-    if (target.closest('.win98-window, .taskbar, .start-menu, .desktop-icon-cell')) return false;
-    // Accept body, canvas, desktop grid background, or interaction layer
-    if (
-      target === document.body ||
-      target === document.getElementById('os-canvas') ||
-      target.classList.contains('desktop-grid') ||
-      target.id === 'vortex-interaction'
-    ) {
-      return true;
-    }
-    return false;
-  }
-
   function onPointerDown(e: PointerEvent) {
-    if (!shouldHandleVortex(e.target)) return;
     lastInteractionS = currentTimeS;
     pointerActive = true;
     pointerId = e.pointerId;
@@ -541,7 +519,7 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     currentTimeS = t;
     // Insert interaction overlay if not yet
     if (!inserted) {
-      const canvas = document.getElementById('os-canvas');
+      const canvas = document.getElementById('scene-canvas');
       if (canvas && canvas.parentNode) {
         canvas.parentNode.insertBefore(interactionLayer, canvas.nextSibling);
         inserted = true;
