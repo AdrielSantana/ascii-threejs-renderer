@@ -4,11 +4,21 @@
  * Each generator writes `count * 3` floats (xyz per particle) into a
  * caller-provided buffer. Positions are scaled to roughly match the vortex
  * sphere (radius ~2.18) so morphs don't shrink the silhouette.
+ *
+ * GLB shapes are loaded asynchronously via `loadGlbShape` and then copied
+ * into the same buffer format by `generateShape` (synchronous, from cache).
  */
 
-export type ShapeName = 'cube' | 'torus' | 'torusKnot' | 'galaxy';
+export type ShapeName = 'cube' | 'torus' | 'torusKnot' | 'galaxy' | 'skull' | 'katana' | 'revolver';
 
-export const SHAPE_NAMES: readonly ShapeName[] = ['cube', 'torus', 'torusKnot', 'galaxy'];
+export const SHAPE_NAMES: readonly ShapeName[] = ['cube', 'torus', 'torusKnot', 'galaxy', 'skull', 'katana', 'revolver'];
+
+// GLB shape URLs — keyed by ShapeName, with orientation correction (Euler XYZ radians)
+export const GLB_SHAPES: Partial<Record<ShapeName, { url: string; rotation?: [number, number, number] }>> = {
+  skull: { url: '/ascii-threejs-renderer/models/skull.glb', rotation: [0, 0, Math.PI / 4] },
+  katana: { url: '/ascii-threejs-renderer/models/katana.glb', rotation: [Math.PI / 2, 0, Math.PI / 4] },
+  revolver: { url: '/ascii-threejs-renderer/models/revolver.glb', rotation: [0, 0, Math.PI / 4] },
+};
 
 export function generateShape(name: ShapeName, count: number, out: Float32Array): void {
   switch (name) {
@@ -20,6 +30,10 @@ export function generateShape(name: ShapeName, count: number, out: Float32Array)
       return generateTorusKnot(count, out);
     case 'galaxy':
       return generateGalaxy(count, out);
+    case 'skull':
+    case 'katana':
+    case 'revolver':
+      return; // GLB shapes are filled synchronously from cache by the caller
   }
 }
 

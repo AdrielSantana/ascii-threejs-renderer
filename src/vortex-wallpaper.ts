@@ -1,16 +1,19 @@
 import * as THREE from 'three';
-import { generateShape, SHAPE_NAMES, ShapeName } from './shape-library';
+import { generateShape, SHAPE_NAMES, ShapeName, GLB_SHAPES } from './shape-library';
+import { loadGlbShape } from './glb-shapes';
 
 /**
  * Fluid Particle Vortex wallpaper.
  *
  * 76k particles (38k mobile) driven entirely by GPU shaders.
  * Pointer interaction creates a fluid trail with spring physics.
- * Morphs into procedural shapes (cube/torus/torusKnot/galaxy) when idle.
+ * Morphs into procedural shapes (cube/torus/torusKnot/galaxy) and GLB
+ * models (skull) when idle.
  */
 
 const isMobile = matchMedia('(pointer: coarse)').matches || innerWidth < 760;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const TARGET_RADIUS = 2.18;
 const PARTICLE_COUNT = reducedMotion ? 22000 : isMobile ? 38000 : 76000;
 const TRAIL_COUNT = 6;
 
@@ -55,9 +58,17 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
   geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
   geometry.setAttribute('aFollow', new THREE.BufferAttribute(follows, 1));
 
+  // Per-particle visibility flag: 1 = participates in shape morph, 0 = hidden during shape mode.
+  // Procedural shapes use all particles (all 1). GLB shapes sub-sample → only shapeCount get 1.
+  const shapeVisible = new Float32Array(PARTICLE_COUNT);
+  shapeVisible.fill(1); // default: all visible
+  geometry.setAttribute('aShapeVisible', new THREE.BufferAttribute(shapeVisible, 1));
+
   // Morph target positions (zeroed = vortex only; filled by state machine)
   const targetArray = new Float32Array(PARTICLE_COUNT * 3);
-  if (forcedShape) generateShape(forcedShape, PARTICLE_COUNT, targetArray);
+  if (forcedShape && !GLB_SHAPES[forcedShape]) {
+    generateShape(forcedShape, PARTICLE_COUNT, targetArray);
+  }
   geometry.setAttribute('aTarget', new THREE.BufferAttribute(targetArray, 3));
 
   // ── Trail uniform (array of vec3) ──
@@ -74,6 +85,8 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     uShapeSpin2: { value: new THREE.Matrix3() },
     uDragRotation: { value: new THREE.Matrix3() },
     uShapeScale: { value: 1 },
+    uBoilAmp: { value: 0.085 },
+    uPointSizeMul: { value: 1.0 },
   };
 
   // ── Particle shader material ──
@@ -94,11 +107,14 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
       uniform mat3 uShapeSpin2;
       uniform mat3 uDragRotation;
       uniform float uShapeScale;
+      uniform float uBoilAmp;
+      uniform float uPointSizeMul;
 
       attribute float aSeed;
       attribute float aSize;
       attribute float aFollow;
       attribute vec3 aTarget;
+      attribute float aShapeVisible;
 
       varying float vAlpha;
       varying float vHue;
@@ -174,13 +190,12 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
         // ── 3. targetPos: shape with rotation + per-particle boil ──
         vec3 spunTarget = uDragRotation * uShapeSpin2 * (uShapeSpin * (aTarget * uShapeScale));
         // boil — each particle displaces along its own seeded noise so the
-        // shape "dissolves" rather than reading as a hard surface
-        float boilAmp = 0.085;
+        // shape "dissolves" rather than reads as a hard surface
         vec3 boil = vec3(
           noise1(aSeed * 17.0 + uTime * 0.95),
           noise1(aSeed * 31.0 + uTime * 1.15),
           noise1(aSeed * 53.0 + uTime * 1.05)
-        ) * boilAmp;
+        ) * uBoilAmp;
         vec3 targetPos = spunTarget + boil;
 
         // ── 4. combine: morph between sphereHome (vortex identity) and
@@ -188,13 +203,16 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
         //    affect both modes identically
         vec3 finalPos = mix(sphereHome, targetPos, uMorph) + fluid;
 
+        // Particles not in the shape fade out as morph → shape progresses
+        float visibility = mix(1.0, aShapeVisible, uMorph);
+
         vec4 mvPosition = modelViewMatrix * vec4(finalPos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
 
         float perspective = 7.4 / max(1.0, -mvPosition.z);
-        gl_PointSize = aSize * uPixelRatio * perspective * (2.0 + core * 1.75);
+        gl_PointSize = aSize * uPixelRatio * perspective * (2.0 + core * 1.75) * uPointSizeMul * visibility;
 
-        vAlpha = mix(0.16, 0.78, core) * (0.65 + aSeed * 0.35);
+        vAlpha = mix(0.16, 0.78, core) * (0.65 + aSeed * 0.35) * visibility;
         vHue = fract(aSeed * 0.55 + normalizedRadius * 0.34 + uTime * 0.018);
         vCore = core;
       }
@@ -285,13 +303,14 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
   // ── Morph state ──
   type MorphPhase = 'vortex_idle' | 'morphing' | 'shape_idle';
   const SHAPES_ORDER: ShapeName[] = [...SHAPE_NAMES];
-  let phase: MorphPhase = forcedShape ? 'shape_idle' : 'vortex_idle';
-  let morphDir: 1 | -1 = forcedShape ? 1 : -1;
-  let morphProgress = forcedShape ? 1 : 0;
+  const isGlbForced = forcedShape && !!GLB_SHAPES[forcedShape];
+  let phase: MorphPhase = (forcedShape && !isGlbForced) ? 'shape_idle' : 'vortex_idle';
+  let morphDir: 1 | -1 = (forcedShape && !isGlbForced) ? 1 : -1;
+  let morphProgress = (forcedShape && !isGlbForced) ? 1 : 0;
   let shapeIdx = 0;
   let shapeStartS = 0;
   let isTouchFading = false;
-  let currentShapeName: ShapeName | undefined = forcedShape;
+  let currentShapeName: ShapeName | undefined = (forcedShape && !isGlbForced) ? forcedShape : undefined;
   let currentTimeS = 0;
   let lastInteractionS = 0;
 
@@ -459,11 +478,106 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
         m2.set(1, 0, 0, 0, cx, -sx, 0, sx, cx);
         break;
       }
+      case 'skull': {
+        // Slow Y turn so you can see all sides
+        const a = t * 0.12;
+        const c = Math.cos(a), s = Math.sin(a);
+        m1.set(c, 0, s, 0, 1, 0, -s, 0, c);
+        m2.identity();
+        break;
+      }
+      case 'katana': {
+        // Z-axis spin so it stays diagonal while rotating in screen plane
+        const a = t * 0.10;
+        const c = Math.cos(a), s = Math.sin(a);
+        m1.set(c, -s, 0, s, c, 0, 0, 0, 1);
+        m2.identity();
+        break;
+      }
+      case 'revolver': {
+        // Y turn + slight X tilt to show the barrel
+        const ay = t * 0.14;
+        const ax = t * 0.04;
+        const cy = Math.cos(ay), sy = Math.sin(ay);
+        const cx = Math.cos(ax), sx = Math.sin(ax);
+        m1.set(cy, 0, sy, 0, 1, 0, -sy, 0, cy);
+        m2.set(1, 0, 0, 0, cx, -sx, 0, sx, cx);
+        break;
+      }
     }
   }
 
+  // GLB shape cache — populated by preloadGlbShapes(), read by loadShape()
+  const glbCache = new Map<ShapeName, {
+    points: Float32Array;
+    pointSizeMul: number;
+    scaledArea: number; // surface area after scaling to TARGET_RADIUS
+  }>();
+
+  // Sphere surface area = 4πr² (our reference for particle density)
+  const SPHERE_AREA = 4 * Math.PI * TARGET_RADIUS * TARGET_RADIUS;
+
+  async function preloadGlbShapes() {
+    const entries = Object.entries(GLB_SHAPES) as [ShapeName, { url: string; rotation?: [number, number, number] }][];
+    await Promise.all(
+      entries.map(async ([name, { url, rotation }]) => {
+        try {
+          const result = await loadGlbShape(url, PARTICLE_COUNT, { rotation });
+          // loadGlbShape scales the model so maxDim = 2*TARGET_RADIUS.
+          // The returned surfaceArea is in pre-scale model units, so:
+          // scaledArea = surfaceArea * scale², where scale = 2*TARGET_RADIUS / maxDim
+          // But we don't have maxDim here. Instead, use densityRatio:
+          // densityRatio = surfaceArea / maxProjectedArea
+          // maxProjectedArea ≈ maxDim² (roughly), so surfaceArea ≈ densityRatio * maxDim²
+          // After scaling: scaledArea = surfaceArea * (2*TARGET_RADIUS/maxDim)²
+          //                          = densityRatio * maxDim² * 4*TARGET_RADIUS²/maxDim²
+          //                          = densityRatio * 4 * TARGET_RADIUS²
+          const scaledArea = result.densityRatio * 4 * TARGET_RADIUS * TARGET_RADIUS;
+          glbCache.set(name, {
+            points: result.points,
+            pointSizeMul: result.pointSizeMul,
+            scaledArea,
+          });
+          console.log(`GLB shape "${name}": densityRatio=${result.densityRatio.toFixed(2)}, pointSizeMul=${result.pointSizeMul.toFixed(3)}, scaledArea=${scaledArea.toFixed(2)} (sphere=${SPHERE_AREA.toFixed(2)})`);
+        } catch (err) {
+          console.warn(`Failed to load GLB shape "${name}" from ${url}:`, err);
+        }
+      }),
+    );
+  }
+
   function loadShape(name: ShapeName) {
-    generateShape(name, PARTICLE_COUNT, targetArray);
+    const cached = glbCache.get(name);
+    if (cached) {
+      const areaRatio = Math.min(1, cached.scaledArea / SPHERE_AREA);
+      const shapeCount = Math.max(PARTICLE_COUNT * 0.15, Math.floor(PARTICLE_COUNT * areaRatio));
+
+      console.log(`loadShape("${name}"): ${shapeCount}/${PARTICLE_COUNT} particles (${(shapeCount/PARTICLE_COUNT*100).toFixed(1)}%), pointSizeMul=${cached.pointSizeMul.toFixed(3)}`);
+
+      // Copy shape points for the first `shapeCount` particles
+      targetArray.set(cached.points.subarray(0, shapeCount * 3), 0);
+
+      // Remaining particles: mark as invisible during shape mode
+      for (let i = shapeCount; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        targetArray[i3] = positions[i3];
+        targetArray[i3 + 1] = positions[i3 + 1];
+        targetArray[i3 + 2] = positions[i3 + 2];
+        shapeVisible[i] = 0;
+      }
+      // Mark shape particles as visible
+      for (let i = 0; i < shapeCount; i++) {
+        shapeVisible[i] = 1;
+      }
+      geometry.attributes.aShapeVisible.needsUpdate = true;
+
+      uniforms.uPointSizeMul.value = cached.pointSizeMul;
+    } else {
+      generateShape(name, PARTICLE_COUNT, targetArray);
+      shapeVisible.fill(1); // procedural shapes: all visible
+      geometry.attributes.aShapeVisible.needsUpdate = true;
+      uniforms.uPointSizeMul.value = 1.0;
+    }
     geometry.attributes.aTarget.needsUpdate = true;
     currentShapeName = name;
   }
@@ -492,6 +606,9 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
         } else if (morphProgress <= 0) {
           morphProgress = 0;
           uniforms.uMorph.value = 0;
+          uniforms.uPointSizeMul.value = 1.0; // reset to vortex default
+          shapeVisible.fill(1); // all particles visible again in vortex
+          geometry.attributes.aShapeVisible.needsUpdate = true;
           shapeIdx = (shapeIdx + 1) % SHAPES_ORDER.length;
           phase = 'vortex_idle';
           isTouchFading = false;
@@ -561,8 +678,15 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     }
 
     // Morph state machine (forcedShape bypasses scheduler)
-    if (forcedShape) {
+    if (forcedShape && !isGlbForced) {
       uniforms.uMorph.value = 1;
+      applyShapeSpin(forcedShape, t);
+    } else if (isGlbForced && glbCache.has(forcedShape!)) {
+      // GLB forced shape: once loaded, lock to shape
+      if (currentShapeName !== forcedShape) {
+        loadShape(forcedShape!);
+        uniforms.uMorph.value = 1;
+      }
       applyShapeSpin(forcedShape, t);
     } else {
       advanceMorphState(t, dt);
@@ -634,6 +758,8 @@ export function createVortexWallpaper(_w: number, _h: number, forcedShape?: Shap
     camera,
     update,
     resize,
+    preloadGlbShapes,
+    uniforms,
     getMorphState: () => ({
       uMorph: uniforms.uMorph.value as number,
       phase,
