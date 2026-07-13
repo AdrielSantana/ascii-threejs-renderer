@@ -1,5 +1,7 @@
 # ASCII GPU Renderer
 
+**Live demo: https://adrielsantana.github.io/ascii-threejs-renderer/**
+
 A real-time ASCII art renderer running entirely on the GPU, built with [Three.js](https://threejs.org/).
 
 A fluid particle vortex (76k GPU-driven particles) is rendered to a framebuffer, then a post-processing shader samples that buffer and maps luminance to characters from a glyph atlas — producing the ASCII effect with zero CPU work per frame.
